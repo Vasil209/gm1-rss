@@ -1,16 +1,13 @@
-# scraper.py
-# Builds an RSS feed from https://display.edubs.ch/gm1 and writes it to ./public/rss.xml
-
-from datetime import datetime, timezone
-from pathlib import Path
-from xml.sax.saxutils import escape
-import email.utils as eut
 import requests
 from bs4 import BeautifulSoup
+from pathlib import Path
+from datetime import datetime, timezone
+from xml.sax.saxutils import escape
+import email.utils as eut
 
 URL = "https://display.edubs.ch/gm1"
 
-def fetch_html(url: str) -> str:
+def fetch_html(url):
     headers = {
         "User-Agent": "GM-Muensterplatz-RSS/1.0 (+github)",
         "Accept": "text/html,application/xhtml+xml",
@@ -19,39 +16,36 @@ def fetch_html(url: str) -> str:
     r.raise_for_status()
     return r.text
 
-def build_items(soup: BeautifulSoup):
+def build_items(soup):
     items = []
-    # Find all "panels" and keep only those under the <h2>Stellvertretungen</h2> section
     for panel in soup.select("div.panel.panel-default"):
-        h2 = panel.find_previous("h2")
-        if not h2 or "Stellvertretungen" not in h2.get_text():
+        # Only include Stellvertretungen with "fällt aus" in body
+        body = panel.select_one(".panel-body")
+        if not body:
+            continue
+        body_text = " ".join(body.stripped_strings)
+        if "fällt aus" not in body_text:
             continue
 
-        day_h3 = panel.find_previous("h3")
-        day_text = (day_h3.get_text(strip=True).rstrip(":") if day_h3 else "").strip()
-
         heading = panel.select_one(".panel-heading")
-        body = panel.select_one(".panel-body")
         footer = panel.select_one(".panel-footer")
+        day_h3 = panel.find_previous("h3")
+        day_text = day_h3.get_text(strip=True).rstrip(":") if day_h3 else ""
 
-        title_text = " ".join(heading.stripped_strings) if heading else "Stellvertretung"
-        desc_parts = []
+        title = " ".join(heading.stripped_strings) if heading else "Stellvertretung"
+        description_parts = []
         if day_text:
-            desc_parts.append(f"Tag: {day_text}")
-        if body:
-            desc_parts.append(" ".join(body.stripped_strings))
+            description_parts.append(f"Tag: {day_text}")
+        description_parts.append(body_text)
         if footer:
-            desc_parts.append(" ".join(footer.stripped_strings))
-        description = " — ".join(desc_parts) if desc_parts else title_text
+            description_parts.append(" ".join(footer.stripped_strings))
+        description = " — ".join(description_parts)
 
-        # pubDate: now in UTC (RSS compliant)
         pub_date = eut.format_datetime(datetime.now(timezone.utc))
-
-        # GUID: stable-ish hash of content
-        guid = f"{day_text}|{title_text}|{description}"
+        guid = f"{day_text}|{title}|{description}"
 
         items.append({
-            "title": title_text,
+            "title": title,
             "description": description,
             "pubDate": pub_date,
             "guid": guid,
@@ -68,9 +62,9 @@ def write_rss(items):
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0">',
         "<channel>",
-        "<title>GM Münsterplatz – Stellvertretungen (inoffiziell)</title>",
+        "<title>GM Münsterplatz – Ausfälle</title>",
         f"<link>{URL}</link>",
-        "<description>Automatisch generierter Feed aus dem Infoscreen (keine offizielle Quelle).</description>",
+        "<description>Automatisch generierter Feed aus dem Infoscreen (nur „fällt aus“ Einträge).</description>",
     ]
 
     body = []
